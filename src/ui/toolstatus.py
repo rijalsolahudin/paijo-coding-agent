@@ -1,5 +1,7 @@
 """Compact one-line status for the tool the agent is currently running."""
 
+import time
+
 from prompt_toolkit.filters import Always, Condition
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.layout import ConditionalContainer, Window
@@ -21,6 +23,8 @@ class ToolStatus:
         self.state = ""
         self.detail = ""
         self.active = False
+        self.elapsed = 0.0
+        self._started: float | None = None
         self.container = ConditionalContainer(
             Window(
                 content=FormattedTextControl(self._text),
@@ -31,15 +35,25 @@ class ToolStatus:
         )
 
     def _text(self) -> FormattedText:
+        if self.state == "running" and self._started is not None:
+            elapsed = time.monotonic() - self._started
+        else:
+            elapsed = self.elapsed
+        suffix = f" {int(elapsed)}s" if elapsed >= 1 else ""
         detail = f" {self.detail}" if self.detail else ""
         return FormattedText(
-            [(STYLES.get(self.state, ""), f" {self.name}{detail} {self.state}")]
+            [(STYLES.get(self.state, ""), f" {self.name}{detail} {self.state}{suffix}")]
         )
 
     def update(self, name: str, state: str, detail: str = "") -> None:
         self.name = name
         self.state = state
         self.detail = detail
+        if state == "running":
+            self._started = time.monotonic()
+            self.elapsed = 0.0
+        elif self._started is not None:
+            self.elapsed = time.monotonic() - self._started
         self.active = True
 
     def clear(self) -> None:

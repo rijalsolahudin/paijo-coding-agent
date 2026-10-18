@@ -11,6 +11,7 @@ from core import (
     SETUP_MESSAGE,
     Agent,
     LLMError,
+    ModelWaiting,
     TextDelta,
     ToolEvent,
     responses_tools,
@@ -26,9 +27,7 @@ def refusal(text):
 
 
 def completed(*output):
-    return SimpleNamespace(
-        type="response.completed", response=SimpleNamespace(output=list(output))
-    )
+    return SimpleNamespace(type="response.completed", response=SimpleNamespace(output=list(output)))
 
 
 def failed(status="failed", code=None):
@@ -124,7 +123,8 @@ def test_request_uses_reasoning_medium_and_disables_storage():
 
     events = list(agent.stream(agent.input_items("halo")))
 
-    assert [event.text for event in events] == ["hi"]
+    texts = [event.text for event in events if isinstance(event, TextDelta)]
+    assert texts == ["hi"]
     call = client.responses.calls[0]
     assert call["model"] == MODEL
     assert call["reasoning"] == {"effort": "medium"}
@@ -142,7 +142,8 @@ def test_refusal_delta_is_surfaced():
 
     events = list(agent.stream(agent.input_items("x")))
 
-    assert "nggak bisa bantu" in "".join(event.text for event in events)
+    texts = [event.text for event in events if isinstance(event, TextDelta)]
+    assert "nggak bisa bantu" in "".join(texts)
 
 
 def test_completed_only_response_still_yields_text():
@@ -206,6 +207,17 @@ def test_tool_loop_replays_reasoning_and_sends_results(tmp_path, monkeypatch):
     ]
     assert outputs[0]["call_id"] == "call_1"
     assert "hello" in outputs[0]["output"]
+
+
+def test_model_waiting_is_emitted_for_every_round(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    call = function_call("bash", '{"command": "true"}', "c1")
+    agent, _ = make_agent([[completed(call)], [delta("done"), completed()]])
+
+    events = list(agent.stream(agent.input_items("go")))
+
+    assert [type(event).__name__ for event in events].count("ModelWaiting") == 2
+    assert isinstance(events[0], ModelWaiting)
 
 
 def test_tool_errors_are_returned_to_the_model(tmp_path, monkeypatch):

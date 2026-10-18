@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import codecs
 import json
-import os
 
 import pytest
 
@@ -79,7 +78,7 @@ def test_write_creates_parent_directories(workspace):
     result = write("a/b/c.txt", "hello")
 
     assert (workspace / "a/b/c.txt").read_text(encoding="utf-8") == "hello"
-    assert "Wrote a/b/c.txt" in result
+    assert "Wrote a/b/c.txt" in result.text
 
 
 def test_write_keeps_an_existing_bom(workspace):
@@ -96,9 +95,9 @@ def test_write_keeps_an_existing_bom(workspace):
 def test_edit_replaces_once_and_returns_a_diff(workspace):
     (workspace / "f.txt").write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
 
-    diff = edit("f.txt", "beta", "BETA")
+    result = edit("f.txt", "beta", "BETA")
 
-    assert "-beta" in diff and "+BETA" in diff
+    assert "-beta" in result.diff and "+BETA" in result.diff
     assert (workspace / "f.txt").read_text(encoding="utf-8") == "alpha\nBETA\ngamma\n"
 
 
@@ -225,3 +224,22 @@ def test_summarize_shows_the_path_or_command():
     assert summarize("bash", json.dumps({"command": "echo hi\nls -la"})) == "echo hi ls -la"
     assert summarize("read", "not json") == ""
     assert len(summarize("bash", json.dumps({"command": "x" * 100}))) == 60
+
+
+def test_write_returns_a_diff_for_display(workspace):
+    result = write("new.txt", "a\nb\n")
+
+    assert result.text.startswith("Wrote")
+    assert result.diff.startswith("--- ")
+    assert "+a" in result.diff
+    assert "+b" in result.diff
+
+
+def test_write_diff_shows_changed_lines_on_overwrite(workspace):
+    (workspace / "f.txt").write_text("old\n", encoding="utf-8")
+
+    result = write("f.txt", "new\n")
+
+    assert result.text.startswith("Overwrote")
+    assert "-old" in result.diff
+    assert "+new" in result.diff

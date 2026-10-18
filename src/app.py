@@ -22,7 +22,15 @@ from prompt_toolkit.layout import ConditionalContainer, HSplit, Layout, Window
 from prompt_toolkit.output import Output
 from rich.text import Text
 
-from core import Agent, Session, SETUP_MESSAGE, TextDelta, ToolEvent, TurnDone
+from core import (
+    SETUP_MESSAGE,
+    Agent,
+    ModelWaiting,
+    Session,
+    TextDelta,
+    ToolEvent,
+    TurnDone,
+)
 from ui.console import console, farewell
 from ui.conversation import Conversation
 from ui.header import build_header
@@ -66,9 +74,16 @@ class PaijoApp:
                 [
                     # A blank line between the printed user turn and the indicator.
                     Window(height=1, char=" "),
-                    self.thinking.container,
-                    self.tools.container,
                     self.preview.container,
+                    self.tools.container,
+                    # Blank line between the tool line and Thinking (only when a
+                    # tool line is actually showing).
+                    ConditionalContainer(
+                        Window(height=1, char=" "),
+                        filter=Condition(lambda: self.tools.active),
+                    ),
+                    # Thinking sits closest to the input.
+                    self.thinking.container,
                 ]
             ),
             filter=Condition(lambda: self._busy),
@@ -130,11 +145,13 @@ class PaijoApp:
         return kb
 
     async def _spin(self) -> None:
-        while self.thinking.active:
+        # Keeps the Thinking dots and the tool's elapsed seconds fresh.
+        while self._busy:
             await asyncio.sleep(TICK)
-            if not self.thinking.active:
+            if not self._busy:
                 return
-            self.thinking.tick()
+            if self.thinking.active:
+                self.thinking.tick()
             self.application.invalidate()
 
     async def _run_turn(self, text: str) -> None:
@@ -150,7 +167,9 @@ class PaijoApp:
 
         try:
             async for event in self.session.send(text):
-                if isinstance(event, ToolEvent):
+                if isinstance(event, ModelWaiting):
+                    self._on_model_waiting()
+                elif isinstance(event, ToolEvent):
                     await self._on_tool_event(event)
                 elif isinstance(event, TextDelta):
                     self._on_text(event.text)
@@ -158,7 +177,7 @@ class PaijoApp:
                     await self._on_turn_done(event)
                     elapsed = time.monotonic() - started
                     await run_in_terminal(
-                        lambda: self.conversation.add_duration(elapsed)
+                        lambda elapsed=elapsed: self.conversation.add_duration(elapsed)
                     )
         finally:
             self.thinking.stop()
@@ -168,6 +187,11 @@ class PaijoApp:
                 self._spinner.cancel()
                 self._spinner = None
             self.application.invalidate()
+
+    def _on_model_waiting(self) -> None:
+        """Show Thinking again for every model round, not just the first."""
+        self.thinking.start()
+        self.application.invalidate()
 
     async def _on_tool_event(self, event: ToolEvent) -> None:
         self.thinking.stop()
@@ -180,6 +204,8 @@ class PaijoApp:
                     event.detail,
                     event.state == "finished",
                     event.output or "",
+                    self.tools.elapsed,
+                    event.diff,
                 )
             )
 
@@ -202,9 +228,7 @@ class PaijoApp:
                 lambda: self.conversation.add_error(event.reply, event.error or "")
             )
         elif event.status == "empty":
-            await run_in_terminal(
-                lambda: self.conversation.add_error(event.reply, EMPTY_REPLY)
-            )
+            await run_in_terminal(lambda: self.conversation.add_error(event.reply, EMPTY_REPLY))
         else:
             await run_in_terminal(lambda: self.conversation.add_assistant(event.reply))
 

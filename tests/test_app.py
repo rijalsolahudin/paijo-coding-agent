@@ -4,6 +4,7 @@ import asyncio
 
 from prompt_toolkit.input import create_pipe_input
 
+from app import PaijoApp
 from core import LLMError, TextDelta, ToolEvent
 from support import FakeChat, roles, start_app, stop_app
 
@@ -264,6 +265,29 @@ def test_edit_diff_is_shown_in_the_scrollback():
     asyncio.run(scenario())
 
 
+def test_write_diff_is_shown_in_the_scrollback():
+    async def scenario() -> None:
+        diff = "--- n.txt\n+++ n.txt\n@@ -0,0 +1 @@\n+hello\n"
+        chat = FakeChat(
+            [
+                ToolEvent("write", "running", detail="n.txt"),
+                ToolEvent("write", "finished", "Wrote n.txt (6 bytes)", "n.txt", diff),
+                TextDelta("ok"),
+            ]
+        )
+        with create_pipe_input() as pipe:
+            app, runner = await start_app(chat, pipe)
+
+            pipe.send_text("buat file\r")
+            await asyncio.sleep(0.6)
+
+            assert app.conversation.diffs == [diff]
+
+            await stop_app(app, runner)
+
+    asyncio.run(scenario())
+
+
 def test_failed_edit_does_not_print_a_diff():
     async def scenario() -> None:
         chat = FakeChat(
@@ -284,6 +308,15 @@ def test_failed_edit_does_not_print_a_diff():
             await stop_app(app, runner)
 
     asyncio.run(scenario())
+
+
+def test_model_waiting_restarts_the_thinking_indicator():
+    app = PaijoApp(chat=FakeChat([]))
+    app.thinking.stop()
+
+    app._on_model_waiting()
+
+    assert app.thinking.active is True
 
 
 def test_turn_duration_is_recorded():

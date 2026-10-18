@@ -17,14 +17,15 @@ from aisuite.utils.tools import Tools
 from tools.bash import bash, terminate_active
 from tools.edit import edit
 from tools.read import read
-from tools.utils import ToolError
+from tools.utils import ToolError, ToolOutput
 from tools.write import write
 
-TOOLS: tuple[Callable[..., str], ...] = (read, write, edit, bash)
+TOOLS: tuple[Callable[..., str | ToolOutput], ...] = (read, write, edit, bash)
 
 __all__ = [
     "TOOLS",
     "ToolError",
+    "ToolOutput",
     "bash",
     "build_tools",
     "dispatch",
@@ -56,8 +57,7 @@ def validate_arguments(name: str, arguments: dict) -> None:
     if unexpected:
         expected = ", ".join(parameters)
         raise ToolError(
-            f"{name}() got unexpected argument(s): {', '.join(unexpected)}. "
-            f"Expected: {expected}"
+            f"{name}() got unexpected argument(s): {', '.join(unexpected)}. Expected: {expected}"
         )
 
     missing = [
@@ -92,7 +92,7 @@ def schemas() -> list[dict]:
     return build_tools().tools(format="openai")
 
 
-def dispatch(name: str, arguments: dict) -> str:
+def dispatch(name: str, arguments: dict) -> str | ToolOutput:
     """Run one tool call by name. Errors propagate; the caller reports them."""
     validate_arguments(name, arguments)
     return _FUNCTIONS[name](**arguments)

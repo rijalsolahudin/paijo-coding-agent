@@ -15,6 +15,7 @@ import unicodedata
 from tools.utils import (
     MUTATION_LOCK,
     ToolError,
+    ToolOutput,
     atomic_write,
     decode,
     encode,
@@ -111,7 +112,7 @@ def _apply(source: str, old_text: str, new_text: str) -> str:
     return "\n".join([*lines[:start], *replacement, *lines[end:]])
 
 
-def edit(path: str, old_text: str, new_text: str) -> str:
+def edit(path: str, old_text: str, new_text: str) -> ToolOutput:
     """Replace one unique occurrence of old_text with new_text.
 
     Returns a unified diff of the change. Fails when the search text is empty,
@@ -148,12 +149,16 @@ def edit(path: str, old_text: str, new_text: str) -> str:
         result = updated.replace("\n", newline) if newline == "\r\n" else updated
         atomic_write(target, encode(result, bom=bom))
 
-    diff = difflib.unified_diff(
-        source.split("\n"),
-        updated.split("\n"),
-        fromfile=relative(target),
-        tofile=relative(target),
-        lineterm="",
-        n=3,
+    diff = truncate(
+        "\n".join(
+            difflib.unified_diff(
+                source.split("\n"),
+                updated.split("\n"),
+                fromfile=relative(target),
+                tofile=relative(target),
+                lineterm="",
+                n=3,
+            )
+        )
     )
-    return truncate("\n".join(diff))
+    return ToolOutput(diff, diff)

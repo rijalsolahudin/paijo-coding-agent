@@ -13,6 +13,7 @@ including reasoning — before appending ``function_call_output``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import queue
@@ -23,7 +24,7 @@ from dataclasses import dataclass
 import openai
 from openai import OpenAI
 
-from tools import ToolError, dispatch, schemas, summarize, terminate_active
+from tools import ToolError, ToolOutput, dispatch, schemas, summarize, terminate_active
 
 BASE_URL = "https://ai.sumopod.com/v1"
 MODEL = "gpt-5.6-luna"
@@ -83,9 +84,15 @@ class ToolEvent:
     state: str  # "running" | "finished" | "failed"
     output: str | None = None
     detail: str = ""
+    diff: str = ""  # display-only; never sent to the model
 
 
-Event = TextDelta | ToolEvent
+@dataclass(frozen=True)
+class ModelWaiting:
+    """The agent is about to wait on the model (start of a request)."""
+
+
+Event = TextDelta | ToolEvent | ModelWaiting
 
 
 def _diagnostics(exc: BaseException) -> str:
@@ -136,8 +143,7 @@ def responses_tools(definitions: Sequence[dict]) -> list[dict]:
                 "type": "function",
                 "name": name,
                 "description": spec.get("description", ""),
-                "parameters": spec.get("parameters")
-                or {"type": "object", "properties": {}},
+                "parameters": spec.get("parameters") or {"type": "object", "properties": {}},
                 "strict": False,
             }
         )
@@ -271,10 +277,8 @@ class Agent:
         client, self._client = self._client, None
         close = getattr(client, "close", None)
         if callable(close):
-            try:
+            with contextlib.suppress(Exception):
                 close()
-            except Exception:
-                pass
 
     # -- the loop ------------------------------------------------------------
 
@@ -287,6 +291,7 @@ class Agent:
             if self._cancelled.is_set():
                 return
 
+            yield ModelWaiting()
             _, output = yield from self._request(client, conversation)
 
             if self._cancelled.is_set():
@@ -347,10 +352,8 @@ class Agent:
         finally:
             close = getattr(stream, "close", None)
             if callable(close):
-                try:
+                with contextlib.suppress(Exception):
                     close()
-                except Exception:
-                    pass
 
         if not completed:
             raise LLMError("Stream berhenti sebelum respons selesai (incomplete).")
@@ -385,27 +388,30 @@ class Agent:
                 )
                 continue
             yield ToolEvent(name, "running", detail=detail)
-            output, ok = self._execute(name, _get(call, "arguments", "") or "")
-            yield ToolEvent(name, "finished" if ok else "failed", output, detail)
+            output, ok, diff = self._execute(name, arguments)
+            yield ToolEvent(name, "finished" if ok else "failed", output, detail, diff)
             outputs.append(_call_output(call_id, output))
         return outputs
 
     @staticmethod
-    def _execute(name: str, arguments: str) -> tuple[str, bool]:
+    def _execute(name: str, arguments: str) -> tuple[str, bool, str]:
         try:
             parsed = json.loads(arguments) if arguments.strip() else {}
         except json.JSONDecodeError as exc:
-            return f"error: arguments were not valid JSON ({exc})", False
+            return f"error: arguments were not valid JSON ({exc})", False, ""
         if not isinstance(parsed, dict):
-            return "error: arguments must be a JSON object", False
+            return "error: arguments must be a JSON object", False, ""
         try:
-            return dispatch(name, parsed), True
+            result = dispatch(name, parsed)
         except ToolError as exc:
-            return f"error: {exc}", False
+            return f"error: {exc}", False, ""
         except TypeError as exc:
-            return f"error: bad arguments for {name}: {exc}", False
+            return f"error: bad arguments for {name}: {exc}", False, ""
         except Exception as exc:  # noqa: BLE001 - handed back so the model can recover
-            return f"error: {name} failed: {type(exc).__name__}: {exc}", False
+            return f"error: {name} failed: {type(exc).__name__}: {exc}", False, ""
+        if isinstance(result, ToolOutput):
+            return result.text, True, result.diff
+        return result, True, ""
 
 
 class StreamRunner:
@@ -437,10 +443,8 @@ class StreamRunner:
     def cancel(self) -> None:
         self._cancelled = True
         if self._on_cancel is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._on_cancel()
-            except Exception:
-                pass
 
     @property
     def cancelled(self) -> bool:

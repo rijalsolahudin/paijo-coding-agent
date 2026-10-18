@@ -87,6 +87,15 @@ def test_tool_calls_are_printed_as_badges():
     ]
 
 
+def test_tool_badge_shows_elapsed_time():
+    console = recording_console()
+    conversation = Conversation(console)
+
+    conversation.add_tool("bash", "true", True, "ok", 0.4)
+
+    assert "0.4s" in console.export_text()
+
+
 def test_diff_is_coloured_like_git():
     console = recording_console()
     conversation = Conversation(console)

@@ -13,6 +13,7 @@ import os
 import stat
 import tempfile
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB
@@ -24,6 +25,18 @@ MUTATION_LOCK = threading.Lock()
 
 class ToolError(Exception):
     """Expected tool failure; the message is returned to the model as output."""
+
+
+@dataclass(frozen=True)
+class ToolOutput:
+    """Tool result split by audience.
+
+    ``text`` is what goes back to the model; ``diff`` is display-only (rendered
+    by the UI) so a full-file rewrite does not burn model context.
+    """
+
+    text: str
+    diff: str = ""
 
 
 def workspace_root() -> Path:

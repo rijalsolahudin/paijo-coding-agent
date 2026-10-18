@@ -29,12 +29,15 @@ Paijo punya empat tool: `read`, `write`, `edit`, dan `bash`.
 
 Tampilan awal terasa fullscreen: layar dibersihkan, banner dicetak di atas, input nempel di
 bawah. Tiap pesan dicetak **di atas prompt** sehingga masuk ke riwayat scrollback terminal.
-Selama agent bekerja, status tool tampil di atas area input lengkap dengan detailnya. Tiap
-tool yang selesai dicetak sebagai badge hijau di scrollback (` READ  [index.html]  89 lines`),
-merah kalau gagal. Untuk `edit`, di bawah badge ada ringkasan (`└ Updated … with 1 addition`)
-plus preview diff dengan nomor baris: baris `-` berlatar merah, baris `+` berlatar hijau.
-Selesai satu turn, ada footer redup ` Worked for 2m 3s` tepat di bawah balasan (jadi persis di
-atas input). Input tetap bisa diketik.
+Selama agent bekerja, indikator di atas input mengikuti fase: `Thinking…` setiap kali menunggu
+model (termasuk di round berikutnya setelah tool), ` bash … running 2s` saat tool berjalan
+(dengan hitungan detik), lalu preview teks saat streaming. Tiap tool yang selesai dicetak
+sebagai badge hijau di scrollback (` READ  [index.html]  89 lines  0.4s`), merah kalau gagal.
+Untuk `edit` dan `write`, di bawah badge ada ringkasan (`└ Updated … with 1 addition`) plus
+preview diff dengan nomor baris: baris `-` berlatar merah, baris `+` berlatar hijau. Diff dari
+`write` cuma untuk tampilan — model tetap menerima ringkasan singkat, jadi konteksnya nggak
+bengkak. Selesai satu turn, ada footer redup ` Worked for 2m 3s` tepat di bawah balasan (jadi
+persis di atas input). Input tetap bisa diketik.
 
 ## Setup
 
@@ -159,6 +162,18 @@ preservasi `edit` (fuzzy, BOM, CRLF, permission), pembatasan path/symlink, timeo
 chunk teks yang di-stream, replay reasoning + hasil tool, stream tidak lengkap yang **tidak**
 memicu eksekusi tool, error API, kredensial hilang, pembatalan (termasuk override riwayat
 setelah tool jalan), serta penyimpanan draf dan seluruh perilaku TUI sebelumnya.
+
+### Lint & pre-commit
+
+```bash
+uv run pre-commit install            # sekali per clone
+uv run pre-commit run --all-files    # ruff check+format, trailing whitespace, dll
+uv run ruff check src tests          # manual
+uv run ruff format src tests         # manual
+```
+
+Hook-nya jalan otomatis tiap `git commit` (ruff check `--fix` + ruff format + cek file dasar).
+Config ruff ada di `pyproject.toml` (`line-length = 100`, rules `E,F,I,UP,B,SIM`).
 
 ## Struktur
 

@@ -41,9 +41,7 @@ class PromptInput:
             style="class:input.body",
         )
         prompt = Window(
-            content=FormattedTextControl(
-                FormattedText([("class:input.prompt", PROMPT_PREFIX)])
-            ),
+            content=FormattedTextControl(FormattedText([("class:input.prompt", PROMPT_PREFIX)])),
             width=2,
             height=Dimension.exact(1),
             dont_extend_height=Always(),

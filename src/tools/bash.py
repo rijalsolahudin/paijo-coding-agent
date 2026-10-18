@@ -7,6 +7,7 @@ here, so treat it as code you would type into your own shell.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import subprocess
@@ -27,10 +28,8 @@ def terminate_active() -> None:
     with _lock:
         process = _active
     if process is not None and process.poll() is None:
-        try:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
 
 
 def bash(command: str, timeout: int = DEFAULT_TIMEOUT) -> str:

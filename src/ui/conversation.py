@@ -17,6 +17,8 @@ from rich.markdown import Markdown
 from rich.padding import Padding
 from rich.text import Text
 
+from ui.format import format_duration, format_elapsed
+
 # Terminals have no alpha channel, so "semi transparent" is approximated by
 # blending the green over a dark terminal background: #3fb950 at ~60% over #1a1a1a.
 USER_BG = "#2f7a3c"
@@ -41,18 +43,6 @@ DIFF_REMOVED = "#f85149"
 DIFF_REMOVED_BG = "#3a1a1a"
 DIFF_DIM = "grey54"
 MAX_DIFF_LINES = 20
-
-
-def format_duration(seconds: float) -> str:
-    """Human-ish duration: ``3s``, ``2m 3s``, ``1h 2m``."""
-    total = max(0, int(round(seconds)))
-    if total < 60:
-        return f"{total}s"
-    minutes, secs = divmod(total, 60)
-    if minutes < 60:
-        return f"{minutes}m {secs}s" if secs else f"{minutes}m"
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours}h {minutes}m" if minutes else f"{hours}h"
 
 
 @dataclass
@@ -109,6 +99,7 @@ def _parse_diff(diff: str) -> DiffPreview:
             lineno += 1
 
     return DiffPreview(path, additions, removals, rows)
+
 
 _WRAP_CONSOLE = Console(
     file=io.StringIO(),
@@ -172,8 +163,16 @@ class Conversation:
         self.console.print()
         self.console.print(Text(f" Worked for {format_duration(seconds)}", style=DIFF_DIM))
 
-    def add_tool(self, name: str, detail: str, ok: bool, output: str = "") -> None:
-        """Print a tool badge; for ``edit`` also the summary and diff preview."""
+    def add_tool(
+        self,
+        name: str,
+        detail: str,
+        ok: bool,
+        output: str = "",
+        elapsed: float = 0.0,
+        diff: str = "",
+    ) -> None:
+        """Print a tool badge; if the tool produced a diff, show it below."""
         self.tool_calls.append((name, detail, ok))
         badge_bg = TOOL_BADGE_BG if ok else TOOL_FAIL_BG
 
@@ -184,12 +183,15 @@ class Conversation:
         if name == "read" and ok and output:
             count = sum(1 for row in output.splitlines() if row.strip())
             line.append(f"  {count} lines", style=DIFF_DIM)
+        if elapsed >= 0.1:
+            line.append(f"  {format_elapsed(elapsed)}", style=DIFF_DIM)
 
         self.console.print()
         self.console.print(line)
 
-        if name == "edit" and ok and output.startswith("--- "):
-            self.add_diff(output)
+        preview = diff or (output if output.startswith("--- ") else "")
+        if ok and preview:
+            self.add_diff(preview)
         elif not ok and output:
             self.console.print(Text(f" └ {output.splitlines()[0]}", style=DIFF_REMOVED))
 
