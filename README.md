@@ -10,9 +10,16 @@ Paijo punya empat tool: `read`, `write`, `edit`, dan `bash`.
 ## Tampilan
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ Paijo v0.1.0 · Enter send · Shift+Enter newline · Ctrl+C cancel · Ctrl+D quit│
-└──────────────────────────────────────────────────────────────────────────────┘
+██████╗  █████╗ ██╗     ██╗ ██████╗
+██╔══██╗██╔══██╗██║     ██║██╔═══██╗
+██████╔╝███████║██║     ██║██║   ██║
+██╔═══╝ ██╔══██║██║██   ██║██║   ██║
+██║     ██║  ██║██║╚█████╔╝╚██████╔╝
+╚═╝     ╚═╝  ╚═╝╚═╝ ╚════╝  ╚═════╝
+
+# Paijo v0.1.0
+# models: gpt-5.6-luna
+# /home/kamu/project
 
  ❯ ganti sapaan di greet.py jadi 'hai'
 
@@ -27,8 +34,10 @@ Paijo punya empat tool: `read`, `write`, `edit`, dan `bash`.
 ────────────────────────────────────────────────────────────────────────────────
 ```
 
-Tampilan awal terasa fullscreen: layar dibersihkan, banner dicetak di atas, input nempel di
-bawah. Tiap pesan dicetak **di atas prompt** sehingga masuk ke riwayat scrollback terminal.
+Saat start layar dibersihkan dulu, lalu banner (wordmark PAIJO hijau plus tiga baris keterangan:
+versi, model, dan direktori kerja) dicetak inline lewat scrollback dan input nyusul tepat di
+bawahnya — jadi **bukan** fullscreen (nggak ada padding sampai dasar layar). Tiap pesan dicetak
+**di atas prompt** sehingga masuk ke riwayat scrollback terminal.
 Selama agent bekerja, indikator di atas input mengikuti fase: `Thinking…` setiap kali menunggu
 model (termasuk di round berikutnya setelah tool), ` bash … running 2s` saat tool berjalan
 (dengan hitungan detik), lalu preview teks saat streaming. Tiap tool yang selesai dicetak

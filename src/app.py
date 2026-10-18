@@ -10,7 +10,7 @@ web, …) can drive the same session.
 from __future__ import annotations
 
 import asyncio
-import shutil
+import os
 import time
 
 from prompt_toolkit.application import Application, run_in_terminal
@@ -43,8 +43,6 @@ from version import __version__
 
 TICK = 0.18
 EXIT_COMMANDS = {"/exit", "/quit", ":q"}
-BANNER_ROWS = 3
-DEFAULT_SIZE = (80, 24)
 EMPTY_REPLY = "Balasan kosong dari model."
 
 
@@ -233,24 +231,12 @@ class PaijoApp:
             await run_in_terminal(lambda: self.conversation.add_assistant(event.reply))
 
     def _print_banner(self) -> None:
-        """Clear the screen, print the banner (and setup hint), pad, then start."""
+        """Clear the screen, then print the banner (and setup hint) above the prompt."""
         console.clear()
-        console.print(build_header(__version__))
-        extra = 0
+        console.print(build_header(__version__, model=self.chat.model, cwd=os.getcwd()))
         if not self.chat.configured:
             console.print()
             console.print(Text(SETUP_MESSAGE, style="bold red"))
-            extra = SETUP_MESSAGE.count("\n") + 2
-        rows = self._terminal_rows()
-        padding = max(0, rows - BANNER_ROWS - extra - 3 - 1)
-        if padding:
-            print("\n" * padding, end="", flush=True)
-
-    def _terminal_rows(self) -> int:
-        try:
-            return self.application.output.get_size().rows
-        except Exception:
-            return shutil.get_terminal_size(DEFAULT_SIZE).lines
 
     def run(self) -> None:
         try:

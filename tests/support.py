@@ -25,6 +25,7 @@ class FakeChat:
         self.interrupted: list[tuple[str, str]] = []
         self.cancelled = False
         self.configured = True
+        self.model = "test-model"
 
     def input_items(self, user_text: str) -> list[dict]:
         return [*self.history, {"role": "user", "content": user_text}]

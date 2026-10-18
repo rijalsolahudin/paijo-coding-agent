@@ -186,15 +186,16 @@ def test_transcript_records_both_roles():
     assert [entry.role for entry in conversation.entries] == ["user", "assistant"]
 
 
-def test_header_banner_shows_name_version_and_hotkeys():
+def test_header_banner_shows_wordmark_and_details():
     console = recording_console()
-    console.print(build_header("9.9.9"))
+    console.print(build_header("9.9.9", model="gpt-5.6-luna", cwd="/work/paijo"))
 
     ansi = console.export_text(styles=True, clear=False)
     out = console.export_text()
-    assert "Paijo" in out
-    assert "9.9.9" in out
-    assert "Enter send" in out
+    assert "Paijo v9.9.9" in out
+    assert "models: gpt-5.6-luna" in out
+    assert "/work/paijo" in out
+    assert "█" in out  # the wordmark is block glyphs
 
-    # The frame uses the same green as the input rules (#3fb950).
+    # The wordmark uses the same green as the input rules (#3fb950).
     assert "63;185;80" in ansi

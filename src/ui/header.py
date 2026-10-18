@@ -1,19 +1,23 @@
-"""Startup banner: agent name, version and hotkey hints."""
+"""Startup banner: the PAIJO wordmark plus a few dim detail lines."""
 
-from rich import box
-from rich.panel import Panel
 from rich.text import Text
 
-from ui.theme import GREEN
+from ui.theme import DIM_FG, GREEN
 
-HOTKEYS = "Enter send · Shift+Enter newline · Ctrl+C cancel · Ctrl+D quit"
+WORDMARK = [
+    "██████╗  █████╗ ██╗     ██╗ ██████╗",
+    "██╔══██╗██╔══██╗██║     ██║██╔═══██╗",
+    "██████╔╝███████║██║     ██║██║   ██║",
+    "██╔═══╝ ██╔══██║██║██   ██║██║   ██║",
+    "██║     ██║  ██║██║╚█████╔╝╚██████╔╝",
+    "╚═╝     ╚═╝  ╚═╝╚═╝ ╚════╝  ╚═════╝",
+]
 
 
-def build_header(version: str) -> Panel:
-    """Build the framed banner that is printed once at startup."""
-    text = Text()
-    text.append(" Paijo ", style="bold white")
-    text.append(f"v{version} ", style=GREEN)
-    text.append("· ", style=GREEN)
-    text.append(HOTKEYS, style="grey54")
-    return Panel(text, box=box.SQUARE, border_style=GREEN, padding=(0, 0))
+def build_header(version: str, *, model: str, cwd: str) -> Text:
+    """Build the banner printed once at startup: wordmark + detail lines."""
+    lines = [Text(line, style=f"bold {GREEN}") for line in WORDMARK]
+    lines.append(Text())
+    for detail in (f"Paijo v{version}", f"models: {model}", cwd):
+        lines.append(Text(f"# {detail}", style=DIM_FG))
+    return Text("\n").join(lines)
