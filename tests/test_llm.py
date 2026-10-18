@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import openai
 import pytest
 
-from llm import (
+from core import (
     MAX_TOOL_CALLS_PER_RESPONSE,
     MODEL,
     SETUP_MESSAGE,
@@ -242,6 +242,22 @@ def test_failed_event_is_reported():
     agent, _ = make_agent([[failed(status="failed", code="server_error")]])
 
     with pytest.raises(LLMError, match="server_error"):
+        list(agent.stream(agent.input_items("x")))
+
+
+def test_timeout_is_reported_distinctly():
+    agent, _ = make_agent([openai.APITimeoutError(request=None)])
+
+    with pytest.raises(LLMError, match="timeout"):
+        list(agent.stream(agent.input_items("x")))
+
+
+def test_connection_error_includes_the_underlying_cause():
+    error = openai.APIConnectionError(request=None)
+    error.__cause__ = ConnectionResetError("boom")
+    agent, _ = make_agent([error])
+
+    with pytest.raises(LLMError, match="ConnectionResetError"):
         list(agent.stream(agent.input_items("x")))
 
 

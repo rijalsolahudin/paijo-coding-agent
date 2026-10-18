@@ -23,18 +23,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-packages = ["tools"]
+packages = ["tools", "ui", "core"]
 py-modules = [
     "app",
-    "console",
-    "conversation",
-    "header",
-    "input_area",
-    "llm",
-    "preview",
-    "theme",
-    "thinking",
-    "toolstatus",
     "version",
 ]
 

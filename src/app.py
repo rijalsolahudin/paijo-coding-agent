@@ -1,16 +1,17 @@
-"""Paijo: a minimal inline coding agent.
+"""Paijo terminal front-end.
 
-The app runs inline (not in the alternate screen), so everything Rich prints
-lands in the terminal scrollback and stays scrollable. prompt_toolkit only owns
-the bottom block: the animated "Thinking…" indicator, the current tool status,
-the streaming preview and the editable input. All blocking LLM and tool work
-happens in :mod:`llm` / :mod:`tools`.
+This module is the *only* place that knows about terminals: prompt_toolkit owns
+the bottom block (Thinking indicator, tool status, streaming preview and the
+editable input) and Rich prints static messages to the scrollback. The engine
+itself lives in :mod:`core` and is UI-agnostic, so another front-end (desktop,
+web, …) can drive the same session.
 """
 
 from __future__ import annotations
 
 import asyncio
 import shutil
+import time
 
 from prompt_toolkit.application import Application, run_in_terminal
 from prompt_toolkit.filters import Condition
@@ -18,19 +19,18 @@ from prompt_toolkit.input import Input
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_bindings import KeyBindingsBase
 from prompt_toolkit.layout import ConditionalContainer, HSplit, Layout, Window
-from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import Output
 from rich.text import Text
 
-from console import console, farewell
-from conversation import Conversation
-from header import build_header
-from input_area import PromptInput
-from llm import SETUP_MESSAGE, Agent, LLMError, StreamRunner, TextDelta, ToolEvent
-from preview import Preview
-from theme import STYLE
-from thinking import Thinking
-from toolstatus import ToolStatus
+from core import Agent, Session, SETUP_MESSAGE, TextDelta, ToolEvent, TurnDone
+from ui.console import console, farewell
+from ui.conversation import Conversation
+from ui.header import build_header
+from ui.input_area import PromptInput
+from ui.preview import Preview
+from ui.theme import STYLE
+from ui.thinking import Thinking
+from ui.toolstatus import ToolStatus
 from version import __version__
 
 TICK = 0.18
@@ -38,10 +38,6 @@ EXIT_COMMANDS = {"/exit", "/quit", ":q"}
 BANNER_ROWS = 3
 DEFAULT_SIZE = (80, 24)
 EMPTY_REPLY = "Balasan kosong dari model."
-INTERRUPTED_NOTE = (
-    "[diinterupsi setelah menjalankan tool; sebagian perubahan file mungkin "
-    "sudah tersimpan — periksa dulu sebelum mengulang]"
-)
 
 
 class PaijoApp:
@@ -55,6 +51,7 @@ class PaijoApp:
         output: Output | None = None,
     ) -> None:
         self.chat = chat if chat is not None else Agent()
+        self.session = Session(self.chat)
         self.conversation = Conversation(console)
         self.input = PromptInput()
         self.thinking = Thinking()
@@ -62,22 +59,22 @@ class PaijoApp:
         self.tools = ToolStatus()
 
         self._busy = False
-        self._cancel_requested = False
-        self._runner: StreamRunner | None = None
         self._spinner: asyncio.Task[None] | None = None
 
         activity = ConditionalContainer(
-            HSplit([self.thinking.container, self.tools.container, self.preview.container]),
+            HSplit(
+                [
+                    # A blank line between the printed user turn and the indicator.
+                    Window(height=1, char=" "),
+                    self.thinking.container,
+                    self.tools.container,
+                    self.preview.container,
+                ]
+            ),
             filter=Condition(lambda: self._busy),
         )
         self.layout = Layout(
-            HSplit(
-                [
-                    activity,
-                    Window(height=Dimension.exact(1), char=" "),
-                    self.input.frame,
-                ]
-            ),
+            HSplit([activity, self.input.container]),
             focused_element=self.input.window,
         )
         self.application: Application[None] = Application(
@@ -112,17 +109,16 @@ class PaijoApp:
                 return
             event.app.create_background_task(self._run_turn(text))
 
-        @kb.add("escape", "enter")
+        @kb.add("c-j")
         def _newline(event) -> None:
+            # Shift+Enter cannot be reported by a terminal on its own, so it is
+            # remapped to send LF ("\n"): that is this binding. See the README.
             self.input.newline()
 
         @kb.add("c-c")
         def _cancel(event) -> None:
             if self._busy:
-                self._cancel_requested = True
-                if self._runner is not None:
-                    # Also kills a running command and stops further tool calls.
-                    self._runner.cancel()
+                self.session.cancel()
                 self.application.invalidate()
             else:
                 self.input.reset()
@@ -142,88 +138,75 @@ class PaijoApp:
             self.application.invalidate()
 
     async def _run_turn(self, text: str) -> None:
+        started = time.monotonic()
         await run_in_terminal(lambda: self.conversation.add_user(text))
 
         self._busy = True
-        self._cancel_requested = False
-        reset = getattr(self.chat, "reset_cancel", None)
-        if callable(reset):
-            reset()
         self.thinking.start()
         self.preview.stop()
         self.tools.clear()
         self.application.invalidate()
         self._spinner = self.application.create_background_task(self._spin())
 
-        items = self.chat.input_items(text)
-        runner = StreamRunner(
-            lambda: self.chat.stream(items),
-            on_cancel=getattr(self.chat, "cancel", None),
-        ).start()
-        self._runner = runner
-
-        pieces: list[str] = []
-        used_tools = False
-        failure: LLMError | None = None
         try:
-            async for event in runner.events():
+            async for event in self.session.send(text):
                 if isinstance(event, ToolEvent):
-                    used_tools = True
-                    self.thinking.stop()
-                    self.tools.update(event.name, event.state)
-                    self.application.invalidate()
-                    continue
-                if isinstance(event, TextDelta):
-                    if not pieces:
-                        self.thinking.stop()
-                        self.preview.start()
-                    pieces.append(event.text)
-                    self.preview.append(event.text)
-                    self.application.invalidate()
-        except LLMError as exc:
-            failure = exc
+                    await self._on_tool_event(event)
+                elif isinstance(event, TextDelta):
+                    self._on_text(event.text)
+                elif isinstance(event, TurnDone):
+                    await self._on_turn_done(event)
+                    elapsed = time.monotonic() - started
+                    await run_in_terminal(
+                        lambda: self.conversation.add_duration(elapsed)
+                    )
+        finally:
+            self.thinking.stop()
+            self.preview.stop()
+            self._busy = False
+            if self._spinner is not None:
+                self._spinner.cancel()
+                self._spinner = None
+            self.application.invalidate()
 
-        await self._finish_turn(
-            text, "".join(pieces), failure, self._cancel_requested, used_tools
-        )
-
-    async def _finish_turn(
-        self,
-        text: str,
-        reply: str,
-        failure: LLMError | None,
-        cancelled: bool,
-        used_tools: bool,
-    ) -> None:
+    async def _on_tool_event(self, event: ToolEvent) -> None:
         self.thinking.stop()
-        self.preview.stop()
-        self._busy = False
-        self._cancel_requested = False
-        if self._runner is not None:
-            # Only cancel a runner that may still be working. Cancelling a
-            # finished one would also cancel the agent and blank out every
-            # later turn.
-            if cancelled:
-                self._runner.cancel()
-            self._runner = None
-        if self._spinner is not None:
-            self._spinner.cancel()
-            self._spinner = None
+        self.tools.update(event.name, event.state, event.detail)
+        self.application.invalidate()
+        if event.state != "running":
+            await run_in_terminal(
+                lambda: self.conversation.add_tool(
+                    event.name,
+                    event.detail,
+                    event.state == "finished",
+                    event.output or "",
+                )
+            )
+
+    def _on_text(self, text: str) -> None:
+        if not self.preview.active:
+            self.thinking.stop()
+            self.preview.start()
+        self.preview.append(text)
         self.application.invalidate()
 
-        if cancelled:
-            # An interrupted turn that already ran tools stays in history: writes
-            # are not rolled back, so a retry must be able to see them.
-            if used_tools:
-                self.chat.note_interruption(text, INTERRUPTED_NOTE)
-            await run_in_terminal(lambda: self.conversation.add_cancelled(reply))
-        elif failure is not None:
-            await run_in_terminal(lambda: self.conversation.add_error(reply, str(failure)))
-        elif reply.strip():
-            self.chat.commit(text, reply)
-            await run_in_terminal(lambda: self.conversation.add_assistant(reply))
+    async def _on_turn_done(self, event: TurnDone) -> None:
+        self.thinking.stop()
+        self.preview.stop()
+        self.application.invalidate()
+
+        if event.status == "cancelled":
+            await run_in_terminal(lambda: self.conversation.add_cancelled(event.reply))
+        elif event.status == "error":
+            await run_in_terminal(
+                lambda: self.conversation.add_error(event.reply, event.error or "")
+            )
+        elif event.status == "empty":
+            await run_in_terminal(
+                lambda: self.conversation.add_error(event.reply, EMPTY_REPLY)
+            )
         else:
-            await run_in_terminal(lambda: self.conversation.add_error(reply, EMPTY_REPLY))
+            await run_in_terminal(lambda: self.conversation.add_assistant(event.reply))
 
     def _print_banner(self) -> None:
         """Clear the screen, print the banner (and setup hint), pad, then start."""
@@ -235,7 +218,7 @@ class PaijoApp:
             console.print(Text(SETUP_MESSAGE, style="bold red"))
             extra = SETUP_MESSAGE.count("\n") + 2
         rows = self._terminal_rows()
-        padding = max(0, rows - BANNER_ROWS - extra - 4 - 1)
+        padding = max(0, rows - BANNER_ROWS - extra - 3 - 1)
         if padding:
             print("\n" * padding, end="", flush=True)
 
@@ -251,9 +234,7 @@ class PaijoApp:
         except KeyboardInterrupt:
             pass
         finally:
-            close = getattr(self.chat, "close", None)
-            if callable(close):
-                close()
+            self.session.close()
             farewell()
 
 

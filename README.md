@@ -11,10 +11,10 @@ Paijo punya empat tool: `read`, `write`, `edit`, dan `bash`.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ Paijo v0.1.0 · Enter send · Alt+Enter newline · Ctrl+C cancel · Ctrl+D quit  │
+│ Paijo v0.1.0 · Enter send · Shift+Enter newline · Ctrl+C cancel · Ctrl+D quit│
 └──────────────────────────────────────────────────────────────────────────────┘
 
-                                          ganti sapaan di greet.py jadi 'hai' 
+ ❯ ganti sapaan di greet.py jadi 'hai'
 
  **Selesai.** Aku baca `greet.py` dulu, lalu ganti sapaannya.
 
@@ -22,15 +22,19 @@ Paijo punya empat tool: `read`, `write`, `edit`, dan `bash`.
  - `edit` — 1 baris diganti, diff bersih
  - `bash` — `python -m pytest` lolos
 
-┌──────────────────────────────────────────────────────────────────────────────┐
-│› Ask Paijo to do something…                                                  │
-└──────────────────────────────────────────────────────────────────────────────┘
+────────────────────────────────────────────────────────────────────────────────
+❯ Ask Paijo to do something…
+────────────────────────────────────────────────────────────────────────────────
 ```
 
 Tampilan awal terasa fullscreen: layar dibersihkan, banner dicetak di atas, input nempel di
 bawah. Tiap pesan dicetak **di atas prompt** sehingga masuk ke riwayat scrollback terminal.
-Selama agent bekerja, status tool (`read running`, `edit finished`, dst.) tampil di atas area
-input, dan input tetap bisa diketik.
+Selama agent bekerja, status tool tampil di atas area input lengkap dengan detailnya. Tiap
+tool yang selesai dicetak sebagai badge hijau di scrollback (` READ  [index.html]  89 lines`),
+merah kalau gagal. Untuk `edit`, di bawah badge ada ringkasan (`└ Updated … with 1 addition`)
+plus preview diff dengan nomor baris: baris `-` berlatar merah, baris `+` berlatar hijau.
+Selesai satu turn, ada footer redup ` Worked for 2m 3s` tepat di bawah balasan (jadi persis di
+atas input). Input tetap bisa diketik.
 
 ## Setup
 
@@ -78,6 +82,9 @@ penggantian yang nggak mengubah apa-apa. Hanya baris yang tersentuh yang ditulis
 gaya newline (LF/CRLF), dan permission bits file tetap dipertahankan. Penyimpanan pakai
 temporary file + `os.replace` (atomik), dan file dicek dulu nggak berubah sejak dibaca.
 
+Diff dari `edit` juga dicetak ke scrollback dengan warna gaya git: baris `-` merah, baris `+`
+hijau (dipotong 40 baris pertama). Model tetap menerima diff polos sebagai output tool.
+
 **Batasan workspace**: semua path di-resolve relatif ke direktori Paijo dijalankan, dan path
 maupun symlink yang keluar dari situ ditolak. Baca/tulis dibatasi 2 MB, output tool dipotong
 di 20.000 karakter dengan penanda jelas.
@@ -104,10 +111,28 @@ di 20.000 karakter dengan penanda jelas.
 | Tombol      | Aksi                                                      |
 | ----------- | --------------------------------------------------------- |
 | `Enter`     | Kirim pesan (diabaikan kalau turn masih berjalan)         |
-| `Alt+Enter` | Baris baru di input                                       |
+| `Shift+Enter` | Baris baru di input (perlu remap, lihat catatan)          |
 | `Ctrl+C`    | Hentikan turn; kalau idle, bersihkan input                |
 | `Ctrl+D`    | Keluar (saat input kosong)                                |
 | `/exit`, `/quit`, `:q` | Keluar lewat command                            |
+
+> **Setup `Shift+Enter`.** Terminal mengirim byte yang sama persis dengan `Enter` (`\r`), dan
+> prompt_toolkit nggak punya key untuk Shift+Enter — jadi Paijo nggak bisa membedakannya secara
+> native. Remap `Shift+Enter` di terminal supaya mengirim LF (`\n`); byte itulah yang ditangkap
+> Paijo sebagai baris baru.
+>
+> VS Code (`keybindings.json`):
+>
+> ```json
+> {
+>   "key": "shift+enter",
+>   "command": "workbench.action.terminal.sendSequence",
+>   "args": { "text": "\n" },
+>   "when": "terminalFocus"
+> }
+> ```
+>
+> Terminal lain: pakai remap serupa yang mengirim `\n`.
 
 ## Pembatalan & error
 
@@ -139,28 +164,38 @@ setelah tool jalan), serta penyimpanan draf dan seluruh perilaku TUI sebelumnya.
 
 ```
 src/
-├── app.py           # aplikasi inline: layout, keybindings, alur turn
-├── llm.py           # Responses API: reasoning, tool loop, worker thread
-├── tools/
-│   ├── __init__.py  # ekspor + registrasi schema lewat aisuite
-│   ├── read.py
-│   ├── write.py
-│   ├── edit.py
-│   ├── bash.py
-│   └── utils.py     # sandbox path, limit ukuran, atomic write
-├── preview.py       # pratinjau streaming (tinggi dibatasi)
-├── toolstatus.py    # status tool di atas input
-├── thinking.py      # indikator "Thinking…"
-├── conversation.py  # render pesan statis pakai Rich
-├── input_area.py    # prompt input 3 baris (#393939)
-├── header.py        # banner awal
-├── theme.py         # palet & style
-├── console.py       # Rich console + pesan perpisahan
-└── version.py
+├── app.py               # front-end terminal: prompt_toolkit + render event
+├── version.py
+├── core/                # engine — tanpa terminal/Rich
+│   ├── __init__.py      # re-export API publik
+│   ├── agent.py         # Responses API: reasoning, tool loop, worker thread
+│   └── session.py       # driver satu turn: event stream, commit, cancel
+├── ui/
+│   ├── __init__.py
+│   ├── conversation.py  # render pesan statis pakai Rich (bubble, diff, markdown)
+│   ├── input_area.py    # prompt input: border atas-bawah + prefix ❯
+│   ├── preview.py       # pratinjau streaming (tinggi dibatasi)
+│   ├── thinking.py      # indikator "Thinking…"
+│   ├── toolstatus.py    # status tool di atas input
+│   ├── header.py        # banner awal
+│   ├── theme.py         # palet & style
+│   └── console.py       # Rich console + pesan perpisahan
+└── tools/
+    ├── __init__.py      # ekspor + registrasi schema lewat aisuite
+    ├── read.py
+    ├── write.py
+    ├── edit.py
+    ├── bash.py
+    └── utils.py         # sandbox path, limit ukuran, atomic write
 ```
 
 ## Catatan implementasi
 
+- **Engine terpisah dari UI.** `core/` nggak mengimpor prompt_toolkit atau Rich.
+  `Session.send(text)` mengalirkan event (`TextDelta`, `ToolEvent`, lalu `TurnDone`) dan
+  mengurus commit/cancel/error, jadi front-end lain (desktop/web) tinggal mengonsumsi event
+  yang sama di atas `Agent` + `tools` yang identik. Semua dependensi terminal cuma ada di
+  `ui/` dan `app.py`.
 - **Inline, bukan fullscreen.** `full_screen=False`, jadi prompt_toolkit cuma memiliki blok
   bawah (Thinking + status tool + preview + input) sementara output Rich masuk scrollback.
 - **Definisi tool dari aisuite.** `tools/__init__.py` mengekspor empat fungsi ber-tipe dan
@@ -169,5 +204,11 @@ src/
   Eksekusi di-dispatch sendiri agar bisa melaporkan status per-call dan mencocokkan `call_id`.
 - **Tool dijalankan di worker thread** bersama request, jadi file dan perintah nggak pernah
   memblokir event loop.
+- **Pesan user**: blok rata kiri dengan teks putih di atas hijau muted `#2f7a3c` (hijau
+  di-blend ke background gelap — terminal nggak punya alpha), penanda `❯` hijau lebih tua, plus
+  1 sel padding kiri-kanan. Pesan assistant: Markdown dengan satu spasi di awal tiap baris,
+  latar normal.
+- **Input**: satu baris edit dengan border atas-bawah putih dan prefix `❯` hijau, tanpa
+  background dan tanpa padding vertikal tambahan.
 - **Streaming UI** memakai buffer dengan cursor di ujung teks dan tinggi maksimum, jadi baris
   terbaru selalu kelihatan tanpa mendorong input keluar layar.

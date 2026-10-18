@@ -4,7 +4,7 @@ import asyncio
 
 from prompt_toolkit.input import create_pipe_input
 
-from llm import LLMError, TextDelta, ToolEvent
+from core import LLMError, TextDelta, ToolEvent
 from support import FakeChat, roles, start_app, stop_app
 
 
@@ -38,7 +38,11 @@ def test_streamed_deltas_reach_the_preview_then_commit():
 def test_tool_status_is_shown_above_the_input():
     async def scenario() -> None:
         chat = FakeChat(
-            [ToolEvent("bash", "running"), ToolEvent("bash", "finished"), TextDelta("selesai")],
+            [
+                ToolEvent("bash", "running", detail="pytest -q"),
+                ToolEvent("bash", "finished", "ok", "pytest -q"),
+                TextDelta("selesai"),
+            ],
             delay=0.2,
         )
         with create_pipe_input() as pipe:
@@ -49,6 +53,7 @@ def test_tool_status_is_shown_above_the_input():
             assert app.tools.active is True
             assert app.tools.name == "bash"
             assert app.tools.state == "running"
+            assert app.tools.detail == "pytest -q"
 
             await asyncio.sleep(0.4)
             assert app.tools.state == "finished"
@@ -56,6 +61,7 @@ def test_tool_status_is_shown_above_the_input():
             await asyncio.sleep(0.5)
             assert app.pending is False
             assert roles(app) == ["user", "assistant"]
+            assert app.conversation.tool_calls == [("bash", "pytest -q", True)]
 
             await stop_app(app, runner)
 
@@ -218,17 +224,79 @@ def test_enter_is_ignored_while_a_turn_is_pending():
     asyncio.run(scenario())
 
 
-def test_multiline_message_is_sent_intact():
+def test_shift_enter_remap_inserts_a_newline():
     async def scenario() -> None:
         chat = FakeChat([TextDelta("oke")])
         with create_pipe_input() as pipe:
             app, runner = await start_app(chat, pipe)
 
-            pipe.send_text("baris satu\x1b\rbaris dua\r")
+            # A terminal remap for Shift+Enter sends LF, which is what we bind.
+            pipe.send_text("baris satu\nbaris dua\r")
             await asyncio.sleep(0.6)
 
             assert app.conversation.entries[0].text == "baris satu\nbaris dua"
-            assert chat.requests[0][-1]["content"] == "baris satu\nbaris dua"
+
+            await stop_app(app, runner)
+
+    asyncio.run(scenario())
+
+
+def test_edit_diff_is_shown_in_the_scrollback():
+    async def scenario() -> None:
+        diff = "--- a/f.txt\n+++ b/f.txt\n@@ -1 +1 @@\n-old\n+new\n"
+        chat = FakeChat(
+            [
+                ToolEvent("edit", "running"),
+                ToolEvent("edit", "finished", diff),
+                TextDelta("selesai"),
+            ]
+        )
+        with create_pipe_input() as pipe:
+            app, runner = await start_app(chat, pipe)
+
+            pipe.send_text("ganti baris\r")
+            await asyncio.sleep(0.6)
+
+            assert app.conversation.diffs == [diff]
+
+            await stop_app(app, runner)
+
+    asyncio.run(scenario())
+
+
+def test_failed_edit_does_not_print_a_diff():
+    async def scenario() -> None:
+        chat = FakeChat(
+            [
+                ToolEvent("edit", "running"),
+                ToolEvent("edit", "failed", "error: old_text was not found"),
+                TextDelta("gagal"),
+            ]
+        )
+        with create_pipe_input() as pipe:
+            app, runner = await start_app(chat, pipe)
+
+            pipe.send_text("ganti baris\r")
+            await asyncio.sleep(0.6)
+
+            assert app.conversation.diffs == []
+
+            await stop_app(app, runner)
+
+    asyncio.run(scenario())
+
+
+def test_turn_duration_is_recorded():
+    async def scenario() -> None:
+        chat = FakeChat([TextDelta("oke")])
+        with create_pipe_input() as pipe:
+            app, runner = await start_app(chat, pipe)
+
+            pipe.send_text("halo\r")
+            await asyncio.sleep(0.6)
+
+            assert len(app.conversation.durations) == 1
+            assert app.conversation.durations[0] >= 0
 
             await stop_app(app, runner)
 

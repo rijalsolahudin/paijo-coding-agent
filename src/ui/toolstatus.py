@@ -19,6 +19,7 @@ class ToolStatus:
     def __init__(self) -> None:
         self.name = ""
         self.state = ""
+        self.detail = ""
         self.active = False
         self.container = ConditionalContainer(
             Window(
@@ -30,11 +31,15 @@ class ToolStatus:
         )
 
     def _text(self) -> FormattedText:
-        return FormattedText([(STYLES.get(self.state, ""), f" {self.name} {self.state}")])
+        detail = f" {self.detail}" if self.detail else ""
+        return FormattedText(
+            [(STYLES.get(self.state, ""), f" {self.name}{detail} {self.state}")]
+        )
 
-    def update(self, name: str, state: str) -> None:
+    def update(self, name: str, state: str, detail: str = "") -> None:
         self.name = name
         self.state = state
+        self.detail = detail
         self.active = True
 
     def clear(self) -> None:

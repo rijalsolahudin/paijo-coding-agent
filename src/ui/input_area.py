@@ -1,22 +1,20 @@
-"""Full-width, single-line prompt input.
+"""Single-line prompt input framed by a top and a bottom rule.
 
-The visible block is exactly three rows: a blank padding row above, the one-line
-editor, and a blank padding row below. The padding comes from an invisible
-``Frame`` border painted in the same #393939 as the block, so no box outline is
-shown while the whole area still reads as a solid grey band.
+The block is exactly three rows: a top rule, the editing line (with a green ``❯``
+prefix), and a bottom rule. There is no background fill and no extra padding.
 """
 
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.filters import Always, Condition
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.layout import VSplit, Window
+from prompt_toolkit.layout import HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.processors import AfterInput, ConditionalProcessor
-from prompt_toolkit.widgets import Frame
 
-PROMPT_PREFIX = "› "
+PROMPT_PREFIX = "❯ "
 PLACEHOLDER = "Ask Paijo to do something…"
+RULE = "─"
 
 
 class PromptInput:
@@ -56,7 +54,24 @@ class PromptInput:
             height=Dimension.exact(1),
             style="class:input.body",
         )
-        self.frame = Frame(body, style="class:input", height=Dimension.exact(3))
+        self.container = HSplit(
+            [
+                Window(
+                    height=Dimension.exact(1),
+                    char=RULE,
+                    dont_extend_height=Always(),
+                    style="class:input.rule",
+                ),
+                body,
+                Window(
+                    height=Dimension.exact(1),
+                    char=RULE,
+                    dont_extend_height=Always(),
+                    style="class:input.rule",
+                ),
+            ],
+            style="class:input.body",
+        )
 
     @property
     def text(self) -> str:

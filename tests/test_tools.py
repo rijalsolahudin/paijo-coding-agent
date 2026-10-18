@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import codecs
+import json
 import os
 
 import pytest
 
-from tools import ToolError, bash, dispatch, edit, read, write
+from tools import ToolError, bash, dispatch, edit, read, summarize, write
 
 
 @pytest.fixture(autouse=True)
@@ -203,7 +204,24 @@ def test_dispatch_unknown_tool_raises():
         dispatch("nope", {})
 
 
+def test_dispatch_reports_unknown_arguments_clearly():
+    with pytest.raises(ToolError, match="unexpected argument.*command"):
+        dispatch("write", {"command": "echo hi"})
+
+
+def test_dispatch_reports_missing_arguments():
+    with pytest.raises(ToolError, match="missing required argument.*content"):
+        dispatch("write", {"path": "a.txt"})
+
+
 def test_dispatch_runs_a_tool(workspace):
     (workspace / "d.txt").write_text("hi\n", encoding="utf-8")
 
     assert "hi" in dispatch("read", {"path": "d.txt"})
+
+
+def test_summarize_shows_the_path_or_command():
+    assert summarize("read", '{"path": "src/app.py"}') == "src/app.py"
+    assert summarize("bash", json.dumps({"command": "echo hi\nls -la"})) == "echo hi ls -la"
+    assert summarize("read", "not json") == ""
+    assert len(summarize("bash", json.dumps({"command": "x" * 100}))) == 60

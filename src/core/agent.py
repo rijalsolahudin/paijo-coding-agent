@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import openai
 from openai import OpenAI
 
-from tools import ToolError, dispatch, schemas, terminate_active
+from tools import ToolError, dispatch, schemas, summarize, terminate_active
 
 BASE_URL = "https://ai.sumopod.com/v1"
 MODEL = "gpt-5.6-luna"
@@ -38,7 +38,13 @@ MAX_TOOL_CALLS_PER_RESPONSE = 8
 SYSTEM_PROMPT = """\
 You are Paijo, a concise coding agent that runs in a terminal.
 
-You have four tools: `read`, `write`, `edit` and `bash`.
+You have four tools:
+- `read(path, offset=1, limit=200)` — read a file with line numbers.
+- `write(path, content)` — create or overwrite a file (full content).
+- `edit(path, old_text, new_text)` — replace one unique snippet.
+- `bash(command, timeout=30)` — run a shell command.
+
+Use exactly these argument names; a command goes to `bash`, never to `write`.
 - Read a file before you edit it, and base edits on what is actually there.
 - Prefer `edit` for small changes, and `write` for new files or full rewrites.
 - Run the relevant tests or checks after changing code, and report what you ran.
@@ -71,10 +77,12 @@ class TextDelta:
 
 @dataclass(frozen=True)
 class ToolEvent:
-    """A tool call starting or finishing."""
+    """A tool call starting or finishing; ``output`` is set when it finishes."""
 
     name: str
     state: str  # "running" | "finished" | "failed"
+    output: str | None = None
+    detail: str = ""
 
 
 Event = TextDelta | ToolEvent
@@ -95,8 +103,16 @@ def _friendly(exc: BaseException) -> LLMError:
         return LLMError(f"API key ditolak (401). Cek lagi {API_KEY_ENV} kamu.")
     if isinstance(exc, openai.RateLimitError):
         return LLMError("Request ditolak (429) — saldo/budget habis atau kena rate limit.")
+    # APITimeoutError subclasses APIConnectionError, so check it first.
+    if isinstance(exc, openai.APITimeoutError):
+        return LLMError(
+            f"Request timeout setelah {REQUEST_TIMEOUT:.0f} detik — model belum merespons. "
+            "Coba lagi; kalau sering, pecah permintaannya jadi lebih kecil."
+        )
     if isinstance(exc, openai.APIConnectionError):
-        return LLMError("Koneksi ke SumoPod gagal atau terputus.")
+        cause = exc.__cause__
+        detail = f" ({type(cause).__name__})" if cause is not None else ""
+        return LLMError(f"Koneksi ke SumoPod gagal atau terputus{detail}. Coba lagi.")
     if isinstance(exc, openai.APIStatusError):
         return LLMError(f"SumoPod membalas HTTP {exc.status_code}{_diagnostics(exc)}.")
     if isinstance(exc, openai.OpenAIError):
@@ -358,6 +374,8 @@ class Agent:
                 break  # stop further calls; finished writes stay on disk
             name = _get(call, "name", "?")
             call_id = _get(call, "call_id", "")
+            arguments = _get(call, "arguments", "") or ""
+            detail = summarize(name, arguments)
             if index >= MAX_TOOL_CALLS_PER_RESPONSE:
                 outputs.append(
                     _call_output(
@@ -366,9 +384,9 @@ class Agent:
                     )
                 )
                 continue
-            yield ToolEvent(name, "running")
+            yield ToolEvent(name, "running", detail=detail)
             output, ok = self._execute(name, _get(call, "arguments", "") or "")
-            yield ToolEvent(name, "finished" if ok else "failed")
+            yield ToolEvent(name, "finished" if ok else "failed", output, detail)
             outputs.append(_call_output(call_id, output))
         return outputs
 
