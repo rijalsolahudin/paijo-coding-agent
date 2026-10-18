@@ -1,0 +1,47 @@
+[project]
+name = "paijo"
+version = "0.1.0"
+description = "Minimalist terminal chat interface for a Python coding agent."
+readme = "README.md"
+authors = [
+    { name = "rijalsolahudin", email = "rijalsolahudin17@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "aisuite[openai]>=0.2.0",
+    "openai>=1.109.1",
+    "prompt-toolkit>=3.0.53",
+    "rich>=15.0.0",
+]
+
+[project.scripts]
+paijo = "app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+packages = ["tools"]
+py-modules = [
+    "app",
+    "console",
+    "conversation",
+    "header",
+    "input_area",
+    "llm",
+    "preview",
+    "theme",
+    "thinking",
+    "toolstatus",
+    "version",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
