@@ -13,6 +13,9 @@ STYLES = {
     "finished": "class:tool.finished",
     "failed": "class:tool.failed",
 }
+# A sub-agent label ("[PLAN]") renders as the same green block as its badge; the
+# rest of the line keeps the normal tool style.
+AGENT_STYLE = "class:tool.agent"
 
 
 class ToolStatus:
@@ -41,9 +44,11 @@ class ToolStatus:
             elapsed = self.elapsed
         suffix = f" {int(elapsed)}s" if elapsed >= 1 else ""
         detail = f" {self.detail}" if self.detail else ""
-        return FormattedText(
-            [(STYLES.get(self.state, ""), f" {self.name}{detail} {self.state}{suffix}")]
-        )
+        state_style = STYLES.get(self.state, "")
+        if self.name.startswith("["):
+            tail = f"{self.detail} {self.state}{suffix}".strip()
+            return FormattedText([(AGENT_STYLE, f" {self.name} "), (state_style, tail)])
+        return FormattedText([(state_style, f" {self.name}{detail} {self.state}{suffix}")])
 
     def update(self, name: str, state: str, detail: str = "") -> None:
         self.name = name

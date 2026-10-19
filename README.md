@@ -5,7 +5,7 @@ Coding agent terminal minimalis, dibangun dengan
 dan [Rich](https://github.com/Textualize/rich), dengan balasan streaming lewat **OpenAI
 Responses API** ke **SumoPod AI**.
 
-Paijo punya empat tool: `read`, `write`, `edit`, dan `bash`.
+Paijo punya lima tool: `read`, `write`, `edit`, `bash`, dan `task` (delegasi ke sub-agent).
 
 ## Tampilan
 
@@ -40,8 +40,11 @@ bawahnya — jadi **bukan** fullscreen (nggak ada padding sampai dasar layar). T
 **di atas prompt** sehingga masuk ke riwayat scrollback terminal.
 Selama agent bekerja, indikator di atas input mengikuti fase: `Thinking…` setiap kali menunggu
 model (termasuk di round berikutnya setelah tool), ` bash … running 2s` saat tool berjalan
-(dengan hitungan detik), lalu preview teks saat streaming. Tiap tool yang selesai dicetak
-sebagai badge hijau di scrollback (` READ  [index.html]  89 lines  0.4s`), merah kalau gagal.
+(dengan hitungan detik) — untuk sub-agent labelnya tampil sebagai blok hijau sejak mulai, sama
+seperti badgenya (` [PLAN] … running 12s`) — lalu preview teks saat streaming. Tiap tool yang selesai dicetak
+sebagai badge hijau di scrollback (` READ  [index.html]  89 lines  0.4s`, atau
+` [PLAN] cari dipakai di mana  12s` untuk sub-agent — labelnya tipe sub-agentnya), merah
+kalau gagal.
 Untuk `edit` dan `write`, di bawah badge ada ringkasan (`└ Updated … with 1 addition`) plus
 preview diff dengan nomor baris: baris `-` berlatar merah, baris `+` berlatar hijau. Diff dari
 `write` cuma untuk tampilan — model tetap menerima ringkasan singkat, jadi konteksnya nggak
@@ -85,6 +88,7 @@ Biar bisa diketik `paijo` dari mana aja: `uv tool install .`
 | `write` | `write(path, content)` | Buat/timpa file UTF-8, bikin direktori induk kalau belum ada. |
 | `edit` | `edit(path, old_text, new_text)` | Ganti **satu** kemunculan unik, balikin unified diff. |
 | `bash` | `bash(command, timeout=30)` | Jalankan `bash -c` di launch directory, balikin stdout+stderr dan exit code. |
+| `task` | `task(prompt, description, subagent_type="general")` | Delegasi satu subtask self-contained ke sub-agent berkonteks bersih; balikin cuma jawaban akhirnya. |
 
 **Edit** mencoba pencocokan persis dulu. Kalau nggak ketemu, dia membandingkan versi
 ternormalisasi (NFKC, trailing whitespace dibuang, smart quotes / Unicode dashes / spasi
@@ -96,6 +100,23 @@ temporary file + `os.replace` (atomik), dan file dicek dulu nggak berubah sejak 
 
 Diff dari `edit` juga dicetak ke scrollback dengan warna gaya git: baris `-` merah, baris `+`
 hijau (dipotong 40 baris pertama). Model tetap menerima diff polos sebagai output tool.
+
+**Sub-agent (`task`)**: model bisa mendelegasikan satu subtask yang *self-contained* ke sub-agent
+berkonteks bersih. Ada tiga tipe: `explore` (read-only: cari & baca file; tool `read` + `bash`),
+`plan` (read-only: susun rencana; `read` + `bash`), dan `general` (bisa `read`, `write`, `edit`,
+`bash`). Tiap sub-agent jalan di `Agent` sendiri dengan riwayat dan instruksi sendiri, dibatasi
+**allowlist** tool, dan **nggak pernah** dapat tool `task` — jadi nggak bisa rekursif (kedalaman
+maks 1). Cuma jawaban akhirnya yang balik ke model induk, jadi konteks induk tetap ramping. Di UI,
+sub-agent muncul sebagai satu badge (` [PLAN] description  …  12s`, labelnya tipe sub-agentnya);
+langkah-langkah di dalamnya belum ditampilkan.
+
+Model yang memutuskan kapan delegasi, tapi `SYSTEM_PROMPT` menetapkan pemicu eksplisit: kalau kamu
+minta *plan* ("bikinin plan" / "rencananya gimana"), model utama **selalu** mendelegasikannya ke
+tipe `plan`; permintaan eksplorasi/pencarian lintas banyak file diarahkan ke `explore`. Kamu juga
+bisa menyebut tipe-nya langsung ("pakai sub-agent explore buat cari …").
+
+> **Catatan:** `explore`/`plan` tetap dapat `bash` (buat `rg`, `find`, dll) dan `bash` **nggak**
+> di-sandbox, jadi sifat read-only-nya dijaga oleh instruksi, bukan oleh mekanisme izin.
 
 **Batasan workspace**: semua path di-resolve relatif ke direktori Paijo dijalankan, dan path
 maupun symlink yang keluar dari situ ditolak. Baca/tulis dibatasi 2 MB, output tool dipotong
@@ -116,6 +137,11 @@ di 20.000 karakter dengan penanda jelas.
   `function_call_output` dengan `call_id` yang cocok dikirim balik ke model.
 - Hasil tool dikirim lagi ke model, dan loop berlanjut sampai model memberi jawaban akhir.
   Error tool dikembalikan ke model supaya dia bisa memulihkan diri.
+- `task` menjalankan `Agent` baru dengan riwayat + instruksi sendiri dan allowlist tool yang
+  terbatas; ia meminjam sinyal cancel dan client HTTP milik induk, lalu mengembalikan **hanya teks
+  akhir** sub-agent. Sub-agent nggak pernah dapat tool `task`, dan kedalaman dibatasi 1. Sebuah
+  agent cuma bisa mengeksekusi tool yang dia iklankan sendiri (`Agent.tool_names`), jadi allowlist
+  ini ditegakkan walau model meminta tool di luarnya.
 - Batas per giliran user: **16 request** ke model, dan **8 tool call** per respons.
 
 ## Keybindings
@@ -166,11 +192,12 @@ di 20.000 karakter dengan penanda jelas.
 uv run pytest
 ```
 
-Semua jaringan di-mock, jadi **nggak butuh API key**. Cakupannya: keempat tool, pencocokan dan
+Semua jaringan di-mock, jadi **nggak butuh API key**. Cakupannya: kelima tool, pencocokan dan
 preservasi `edit` (fuzzy, BOM, CRLF, permission), pembatasan path/symlink, timeout `bash`,
 chunk teks yang di-stream, replay reasoning + hasil tool, stream tidak lengkap yang **tidak**
 memicu eksekusi tool, error API, kredensial hilang, pembatalan (termasuk override riwayat
-setelah tool jalan), serta penyimpanan draf dan seluruh perilaku TUI sebelumnya.
+setelah tool jalan), perilaku sub-agent (allowlist, batas kedalaman, teks yang dikembalikan),
+serta penyimpanan draf dan seluruh perilaku TUI sebelumnya.
 
 ### Lint & pre-commit
 
@@ -193,7 +220,9 @@ src/
 ├── core/                # engine — tanpa terminal/Rich
 │   ├── __init__.py      # re-export API publik
 │   ├── agent.py         # Responses API: reasoning, tool loop, worker thread
-│   └── session.py       # driver satu turn: event stream, commit, cancel
+│   ├── context.py       # contextvar ambien: depth/cancel/client buat tool yang dipanggil
+│   ├── session.py       # driver satu turn: event stream, commit, cancel
+│   └── subagent.py      # definisi & runtime sub-agent (general/explore/plan)
 ├── ui/
 │   ├── __init__.py
 │   ├── conversation.py  # render pesan statis pakai Rich (bubble, diff, markdown)
@@ -210,6 +239,7 @@ src/
     ├── write.py
     ├── edit.py
     ├── bash.py
+    ├── task.py          # delegasi ke sub-agent (general/explore/plan)
     └── utils.py         # sandbox path, limit ukuran, atomic write
 ```
 

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import time
+from types import SimpleNamespace
 
 from prompt_toolkit.input import create_pipe_input  # noqa: F401  (re-exported)
 from prompt_toolkit.output import DummyOutput
 
 from app import PaijoApp
+from core import Agent
 
 BOOT = 0.2
 
@@ -78,3 +80,84 @@ async def stop_app(app: PaijoApp, runner: asyncio.Task) -> None:
 
 def roles(app: PaijoApp) -> list[str]:
     return [entry.role for entry in app.conversation.entries]
+
+
+# -- Responses API fakes ------------------------------------------------------
+# A scripted stand-in for the OpenAI client: each ``responses.create`` call pops
+# the next scripted batch of SSE events. Shared by the agent-loop and sub-agent
+# tests, so neither needs a real network.
+
+
+def delta(text):
+    return SimpleNamespace(type="response.output_text.delta", delta=text)
+
+
+def refusal(text):
+    return SimpleNamespace(type="response.refusal.delta", delta=text)
+
+
+def completed(*output):
+    return SimpleNamespace(type="response.completed", response=SimpleNamespace(output=list(output)))
+
+
+def failed(status="failed", code=None):
+    return SimpleNamespace(
+        type="response.failed",
+        response=SimpleNamespace(status=status, error=SimpleNamespace(code=code)),
+    )
+
+
+def function_call(name, arguments, call_id):
+    return SimpleNamespace(type="function_call", name=name, arguments=arguments, call_id=call_id)
+
+
+def reasoning(item_id="rs_1"):
+    return SimpleNamespace(type="reasoning", id=item_id, encrypted_content="encrypted")
+
+
+def message_item(text):
+    return SimpleNamespace(
+        type="message", role="assistant", content=[SimpleNamespace(type="output_text", text=text)]
+    )
+
+
+class FakeStream:
+    def __init__(self, events):
+        self.events = events
+        self.closed = False
+
+    def __iter__(self):
+        yield from self.events
+
+    def close(self):
+        self.closed = True
+
+
+class FakeResponses:
+    def __init__(self, scripts):
+        self.scripts = list(scripts)
+        self.calls = []
+        self.streams = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        script = self.scripts.pop(0)
+        if isinstance(script, Exception):
+            raise script
+        stream = FakeStream(script)
+        self.streams.append(stream)
+        return stream
+
+
+class FakeClient:
+    def __init__(self, scripts):
+        self.responses = FakeResponses(scripts)
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def make_agent(scripts, **kwargs):
+    client = FakeClient(scripts)
+    return Agent(api_key="test-key", client=client, **kwargs), client

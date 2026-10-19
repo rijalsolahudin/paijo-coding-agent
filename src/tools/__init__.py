@@ -1,9 +1,9 @@
-"""Paijo's four tools: read, write, edit and bash.
+"""Paijo's five tools: read, write, edit, bash and task.
 
 The typed functions are the single source of truth for schema, argument
 validation and execution. aisuite's ``Tools`` helper turns them into tool
-definitions; the agent loop dispatches calls itself (see :mod:`llm`) so it can
-report per-call status and match Responses API call ids.
+definitions; the agent loop dispatches calls itself (see :mod:`core.agent`) so it
+can report per-call status and match Responses API call ids.
 """
 
 from __future__ import annotations
@@ -17,10 +17,11 @@ from aisuite.utils.tools import Tools
 from tools.bash import bash, terminate_active
 from tools.edit import edit
 from tools.read import read
+from tools.task import task
 from tools.utils import ToolError, ToolOutput
 from tools.write import write
 
-TOOLS: tuple[Callable[..., str | ToolOutput], ...] = (read, write, edit, bash)
+TOOLS: tuple[Callable[..., str | ToolOutput], ...] = (read, write, edit, bash, task)
 
 __all__ = [
     "TOOLS",
@@ -30,9 +31,11 @@ __all__ = [
     "build_tools",
     "dispatch",
     "edit",
+    "label_for",
     "read",
     "schemas",
     "summarize",
+    "task",
     "terminate_active",
     "validate_arguments",
     "write",
@@ -79,7 +82,30 @@ def summarize(name: str, arguments: str) -> str:
         return ""
     if name == "bash":
         return " ".join(str(data.get("command", "")).split())[:60]
+    if name == "task":
+        label = str(data.get("description", "")).strip()
+        if label:
+            return label[:60]
+        return " ".join(str(data.get("prompt", "")).split())[:60]
     return str(data.get("path", ""))
+
+
+def _subagent_type(name: str, arguments: str) -> str:
+    if name != "task":
+        return ""
+    try:
+        data = json.loads(arguments) if arguments.strip() else {}
+    except json.JSONDecodeError:
+        return ""
+    if isinstance(data, dict):
+        return str(data.get("subagent_type", "")).strip()
+    return ""
+
+
+def label_for(name: str, arguments: str) -> str:
+    """The label shown in the UI: ``[TYPE]`` for a sub-agent (`task`), else the tool."""
+    kind = _subagent_type(name, arguments)
+    return f"[{kind.upper()}]" if kind else name
 
 
 def build_tools() -> Tools:

@@ -16,81 +16,16 @@ from core import (
     ToolEvent,
     responses_tools,
 )
-
-
-def delta(text):
-    return SimpleNamespace(type="response.output_text.delta", delta=text)
-
-
-def refusal(text):
-    return SimpleNamespace(type="response.refusal.delta", delta=text)
-
-
-def completed(*output):
-    return SimpleNamespace(type="response.completed", response=SimpleNamespace(output=list(output)))
-
-
-def failed(status="failed", code=None):
-    return SimpleNamespace(
-        type="response.failed",
-        response=SimpleNamespace(status=status, error=SimpleNamespace(code=code)),
-    )
-
-
-def function_call(name, arguments, call_id):
-    return SimpleNamespace(type="function_call", name=name, arguments=arguments, call_id=call_id)
-
-
-def reasoning(item_id="rs_1"):
-    return SimpleNamespace(type="reasoning", id=item_id, encrypted_content="encrypted")
-
-
-def message_item(text):
-    return SimpleNamespace(
-        type="message", role="assistant", content=[SimpleNamespace(type="output_text", text=text)]
-    )
-
-
-class FakeStream:
-    def __init__(self, events):
-        self.events = events
-        self.closed = False
-
-    def __iter__(self):
-        yield from self.events
-
-    def close(self):
-        self.closed = True
-
-
-class FakeResponses:
-    def __init__(self, scripts):
-        self.scripts = list(scripts)
-        self.calls = []
-        self.streams = []
-
-    def create(self, **kwargs):
-        self.calls.append(kwargs)
-        script = self.scripts.pop(0)
-        if isinstance(script, Exception):
-            raise script
-        stream = FakeStream(script)
-        self.streams.append(stream)
-        return stream
-
-
-class FakeClient:
-    def __init__(self, scripts):
-        self.responses = FakeResponses(scripts)
-        self.closed = False
-
-    def close(self):
-        self.closed = True
-
-
-def make_agent(scripts, **kwargs):
-    client = FakeClient(scripts)
-    return Agent(api_key="test-key", client=client, **kwargs), client
+from support import (
+    completed,
+    delta,
+    failed,
+    function_call,
+    make_agent,
+    message_item,
+    reasoning,
+    refusal,
+)
 
 
 def test_tool_definitions_are_converted_for_the_responses_api():
@@ -132,7 +67,7 @@ def test_request_uses_reasoning_medium_and_disables_storage():
     assert call["include"] == ["reasoning.encrypted_content"]
     assert call["stream"] is True
     assert call["instructions"]
-    assert {tool["name"] for tool in call["tools"]} == {"read", "write", "edit", "bash"}
+    assert {tool["name"] for tool in call["tools"]} == {"read", "write", "edit", "bash", "task"}
     assert all(tool["strict"] is False for tool in call["tools"])
     assert client.responses.streams[0].closed is True
 

@@ -7,6 +7,7 @@ from prompt_toolkit.input import create_pipe_input
 from app import PaijoApp
 from core import LLMError, TextDelta, ToolEvent
 from support import FakeChat, roles, start_app, stop_app
+from ui.toolstatus import ToolStatus
 
 
 def test_streamed_deltas_reach_the_preview_then_commit():
@@ -334,6 +335,23 @@ def test_turn_duration_is_recorded():
             await stop_app(app, runner)
 
     asyncio.run(scenario())
+
+
+def test_a_normal_tool_status_line_is_one_dim_fragment():
+    status = ToolStatus()
+    status.update("bash", "running", "pytest -q")
+
+    assert list(status._text()) == [("class:tool.running", " bash pytest -q running")]
+
+
+def test_subagent_label_is_a_green_tag_in_the_status_line():
+    status = ToolStatus()
+    status.update("[PLAN]", "running", "Susun rencana page baru")
+
+    fragments = list(status._text())
+
+    assert fragments[0] == ("class:tool.agent", " [PLAN] ")
+    assert fragments[1] == ("class:tool.running", "Susun rencana page baru running")
 
 
 def test_blank_input_is_not_submitted():

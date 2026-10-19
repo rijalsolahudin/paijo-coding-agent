@@ -18,6 +18,7 @@ from rich.padding import Padding
 from rich.text import Text
 
 from ui.format import format_duration, format_elapsed
+from ui.theme import TOOL_BADGE_BG, TOOL_BADGE_FG
 
 # Terminals have no alpha channel, so "semi transparent" is approximated by
 # blending the green over a dark terminal background: #3fb950 at ~60% over #1a1a1a.
@@ -33,8 +34,6 @@ NOTICE_STYLE = "grey54"
 ERROR_STYLE = "bold red"
 CANCELLED_NOTICE = "[dibatalkan]"
 
-TOOL_BADGE_BG = "#3fb950"
-TOOL_BADGE_FG = "#0b1f12"
 TOOL_FAIL_BG = "#b03a3a"
 
 DIFF_ADDED = "#3fb950"
@@ -176,10 +175,12 @@ class Conversation:
         self.tool_calls.append((name, detail, ok))
         badge_bg = TOOL_BADGE_BG if ok else TOOL_FAIL_BG
 
+        label = name.upper()
         line = Text()
-        line.append(f" {name.upper()} ", style=f"bold {TOOL_BADGE_FG} on {badge_bg}")
+        line.append(f" {label} ", style=f"bold {TOOL_BADGE_FG} on {badge_bg}")
         if detail:
-            line.append(f" [{detail}]", style="bold")
+            # A sub-agent label is already bracketed ("[PLAN]"), so don't double up.
+            line.append(f" {detail}" if label.startswith("[") else f" [{detail}]", style="bold")
         if name == "read" and ok and output:
             count = sum(1 for row in output.splitlines() if row.strip())
             line.append(f"  {count} lines", style=DIFF_DIM)
